@@ -6,25 +6,20 @@
   var fast=ld && ld.classList.contains('fast');
   var t0=performance.now();
 
-  /* ---------- 1. pré-carregamento durante a abertura ---------- */
-  var imgs=[].slice.call(document.querySelectorAll('img[src]'));
-  var total=imgs.length, done=0;
-  function tick(){ done++; if(bar) bar.style.transform='scaleX('+(total?done/total:1)+')'; }
-  var loads=imgs.map(function(im){
-    im.loading='eager'; im.decoding='async';
-    return new Promise(function(res){
-      if(im.complete && im.naturalWidth){ tick(); return res(); }
-      var pre=new Image(); pre.decoding='async';
-      pre.onload=pre.onerror=function(){ tick(); res(); };
-      pre.src=im.currentSrc||im.src;
-    });
-  });
+  /* ---------- 1. abertura: espera a animação e as fontes, não as fotos ---------- */
+  // As fotos carregam sozinhas conforme a pessoa rola (lazy) e em miniatura leve;
+  // durante a abertura só adiantamos as primeiras, sem travar nada.
+  var imgs=[].slice.call(document.querySelectorAll('.page img[loading="lazy"]'));
+  var warm=imgs.slice(0,6);
+  setTimeout(function(){ warm.forEach(function(im){ var p=new Image(); p.decoding='async'; p.src=im.getAttribute('src'); }); },600);
   var fonts=(document.fonts&&document.fonts.ready)?document.fonts.ready:Promise.resolve();
-  var MIN=reduce?500:(fast?2400:5000), MAX=reduce?2500:(fast?4200:8500);
-  var minWait=new Promise(function(r){ setTimeout(r,MIN) });
-  var all=Promise.all([Promise.all(loads),fonts,minWait]);
-  var cap=new Promise(function(r){ setTimeout(r,MAX) });
-  Promise.race([all,cap]).then(exit);
+  var MIN=reduce?400:(fast?2400:5000), MAX=reduce?1500:(fast?3000:6000);
+  var prog=0, pt=setInterval(function(){ prog=Math.min(1,(performance.now()-(window.__ldStart||0))/MIN); if(bar) bar.style.transform='scaleX('+prog+')'; if(prog>=1) clearInterval(pt); },120);
+  window.__motionReady=true;
+  var since=performance.now()-(window.__ldStart||0);
+  var minWait=new Promise(function(r){ setTimeout(r,Math.max(0,MIN-since)) });
+  var cap=new Promise(function(r){ setTimeout(r,Math.max(0,MAX-since)) });
+  Promise.race([Promise.all([fonts,minWait]),cap]).then(exit);
 
   function exit(){
     if(!ld) return start(false);
@@ -127,7 +122,9 @@
       G.to('.hero-mono',{yPercent:12,ease:'none',scrollTrigger:{trigger:'#inicio',start:'top top',end:'bottom top',scrub:.6}});
     });
 
-    window.addEventListener('load',function(){ ST.refresh() });
+    var rt=null; function soon(){ clearTimeout(rt); rt=setTimeout(function(){ ST.refresh() },200); }
+    imgs.forEach(function(im){ if(!im.complete) im.addEventListener('load',soon,{once:true}); });
+    window.addEventListener('load',soon);
     lightbox();
   }
 
@@ -138,7 +135,10 @@
     var group=[], gi=0, busy=false, last=null;
     function thumbImg(i){ return group[i].querySelector('img'); }
     function setCap(){ lbCap.innerHTML=group[gi].getAttribute('data-cap')+'<small>'+(gi+1<10?'0':'')+(gi+1)+' / '+(group.length<10?'0':'')+group.length+'</small>'; }
-    function load(i){ var im=thumbImg(i); lbImg.src=im.currentSrc||im.src; lbImg.alt=im.alt; return lbImg.decode?lbImg.decode().catch(function(){}):Promise.resolve(); }
+    function load(i){ var im=thumbImg(i), full=im.getAttribute('data-full');
+      lbImg.src=im.currentSrc||im.src; lbImg.alt=im.alt;
+      if(full){ var hi=new Image(); hi.onload=function(){ if(thumbImg(gi)===im) lbImg.src=full; }; hi.src=full; }
+      return lbImg.decode?lbImg.decode().catch(function(){}):Promise.resolve(); }
     function flipFrom(el){
       var a=el.getBoundingClientRect(), b=lbImg.getBoundingClientRect();
       if(!b.width) return null;
